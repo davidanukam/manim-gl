@@ -3,6 +3,7 @@
 from manimlib import DOWN, LEFT, RIGHT, Rectangle, UP, VGroup
 
 from .icons import icon
+from .motion import animated
 from .primitives import Badge, Panel, Surround, TextCard, apply_state
 from .text import Body, Headline, MonoText, Title
 from .theme import (
@@ -102,12 +103,19 @@ class Computer(Surround):
     """A framed grid of resource tiles. One name can be ``accented``.
 
     ``Computer([["vCPU", "vRAM"], ["vDISK", "Kernel"]], accent="Kernel")``
+
+    Animate ``set_accent("Kernel")`` to fill one tile, or ``set_accent(None)``
+    to clear it. Scale and shift work like any other mobject.
     """
 
     def __init__(self, tiles, accent=None, tile_width=1.45, tile_height=0.68, **kwargs):
         rows = tiles
         if tiles and not isinstance(tiles[0], (list, tuple)):
             rows = [tiles]
+        self._tiles = [[str(name) for name in row] for row in rows]
+        self._accent = accent
+        self._tile_width = tile_width
+        self._tile_height = tile_height
         built = []
         for row in rows:
             cells = VGroup()
@@ -123,6 +131,16 @@ class Computer(Surround):
         grid = VGroup(*built).arrange(DOWN, buff=0.1)
         super().__init__(grid, buff=0.16, state="outline", corner_radius=0.14, **kwargs)
         self.tiles = grid
+
+    @animated("_tiles", "_accent", "_tile_width", "_tile_height", anchor="center")
+    def set_accent(self, name):
+        """Fill the tile with this name. ``None`` clears the accent."""
+        return Computer(
+            self._tiles,
+            accent=name,
+            tile_width=self._tile_width,
+            tile_height=self._tile_height,
+        )
 
 
 class LayerRow(VGroup):
@@ -156,14 +174,49 @@ class LayerRow(VGroup):
 class LayerStack(VGroup):
     """A vertical list of :class:`LayerRow` items.
 
-    ``layers`` is a list of ``(instruction, status)`` pairs.
+    ``layers`` is a list of ``(instruction, status)`` pairs. Status is
+    ``CACHED`` or ``REBUILD``.
+
+    Animate:
+    - ``add(("RUN echo hi", "REBUILD"))`` grows the stack downward
+    - ``set_status(0, "REBUILD")`` changes one row
+    - ``pop()`` removes the last row
+
+    ``self.play(stack.animate.add(("COPY . .", "CACHED")))``
     """
 
     def __init__(self, layers, width=7.2, buff=0.1):
-        rows = [LayerRow(instr, status, width=width) for instr, status in layers]
+        self._layers = [(str(instr), status) for instr, status in layers]
+        self._width = width
+        self._buff = buff
+        rows = [LayerRow(instr, status, width=width) for instr, status in self._layers]
         super().__init__(*rows)
         self.arrange(DOWN, buff=buff)
         self.rows = rows
+
+    def _spawn(self, layers):
+        return LayerStack(layers, width=self._width, buff=self._buff)
+
+    @animated("_layers", "_width", "_buff", anchor="top_left", mobject_safe=True)
+    def add(self, instruction, status="CACHED"):
+        """Append a layer. A ``(instruction, status)`` pair works too."""
+        if isinstance(instruction, (tuple, list)):
+            instruction, status = instruction
+        return self._spawn([*self._layers, (str(instruction), status)])
+
+    @animated("_layers", "_width", "_buff", anchor="top_left")
+    def set_status(self, index, status):
+        """Change one layer's status."""
+        layers = list(self._layers)
+        layers[index] = (layers[index][0], status)
+        return self._spawn(layers)
+
+    @animated("_layers", "_width", "_buff", anchor="top_left")
+    def pop(self, index=-1):
+        """Remove one layer."""
+        layers = list(self._layers)
+        layers.pop(index)
+        return self._spawn(layers)
 
 
 class LeaderboardRow(VGroup):
@@ -188,9 +241,17 @@ class Leaderboard(VGroup):
     """A ranked list. ``highlight`` is a row index or a rank string.
 
     Optional ``title`` and ``subtitle`` sit to the left, as in the Redis video.
+
+    Animate ``add(("05", "mochi", "9,128"))``, ``set_highlight(2)``, and
+    ``pop()``. The title stays put while rows grow downward.
     """
 
     def __init__(self, rows, highlight=None, title=None, subtitle=None, width=6.4):
+        self._rows = [tuple(row) for row in rows]
+        self._highlight = highlight
+        self._title = title
+        self._subtitle = subtitle
+        self._width = width
         lines = VGroup()
         built = []
         for i, (rank, name, score) in enumerate(rows):
@@ -216,15 +277,63 @@ class Leaderboard(VGroup):
         super().__init__(*parts)
         self.lines = lines
 
+    def _spawn(self, rows, highlight):
+        return Leaderboard(
+            rows,
+            highlight=highlight,
+            title=self._title,
+            subtitle=self._subtitle,
+            width=self._width,
+        )
+
+    @animated(
+        "_rows", "_highlight", "_title", "_subtitle", "_width",
+        anchor="top_left", mobject_safe=True,
+    )
+    def add(self, *rows):
+        """Append ``("rank", "name", "score")`` rows."""
+        return self._spawn([*self._rows, *rows], self._highlight)
+
+    @animated("_rows", "_highlight", "_title", "_subtitle", "_width", anchor="top_left")
+    def set_highlight(self, highlight):
+        """Highlight a row index or a rank string. ``None`` clears it."""
+        return self._spawn(self._rows, highlight)
+
+    @animated("_rows", "_highlight", "_title", "_subtitle", "_width", anchor="top_left")
+    def pop(self, index=-1):
+        """Remove one ranked row."""
+        rows = list(self._rows)
+        rows.pop(index)
+        return self._spawn(rows, self._highlight)
+
 
 class Checklist(VGroup):
     """A verification panel.
 
     ``items`` is a list of ``(label, status)`` with status ``VALID``,
     ``PENDING``, or ``FAIL``.
+
+    Animate:
+    - ``add(("Domain matches bank.com", "VALID"))`` grows the list downward
+    - ``set_status(1, "VALID")`` changes one row's mark
+    - ``pop()`` removes the last row
+    - ``scale``, ``shift``, and ``set_color`` still chain like any mobject
+
+    One list method per ``self.play`` call. Pass timing to ``play``::
+
+        cl = Checklist("VERIFYING", "bank.com", [
+            ("Certificate signed by intermediate", "VALID"),
+        ])
+        self.play(Write(cl))
+        self.play(cl.animate.add(("This list works", "VALID")))
+        self.play(cl.animate.set_status(0, "FAIL"), run_time=0.8)
     """
 
     def __init__(self, title, subject, items, width=7.6):
+        self._title = title
+        self._subject = subject
+        self._width = width
+        self._items = [(str(label), str(status).upper()) for label, status in items]
         header = VGroup(
             Title(title, font_size=18),
             Body(subject, font_size=28, color=TEXT),
@@ -232,7 +341,7 @@ class Checklist(VGroup):
         inner_w = max(width - 0.72, header.get_width() + 0.2)
         blocks = []
         self.item_rows = []
-        for label, status in items:
+        for label, status in self._items:
             key = str(status).upper()
             if key == "VALID":
                 dot = icon("dot", color=PURPLE, height=0.16)
@@ -273,13 +382,63 @@ class Checklist(VGroup):
         self.panel.move_to(everything)
         super().__init__(self.panel, everything)
 
+    def _spawn(self, items):
+        return Checklist(self._title, self._subject, items, width=self._width)
+
+    @animated("_title", "_subject", "_width", "_items", anchor="top_left", mobject_safe=True)
+    def add(self, *items):
+        """Append one or more ``("label", "STATUS")`` rows.
+
+        ``add("Domain matches", "VALID")`` and
+        ``add(("Domain matches", "VALID"))`` both work.
+        """
+        return self._spawn([*self._items, *_pairs(items)])
+
+    @animated("_title", "_subject", "_width", "_items", anchor="top_left")
+    def set_status(self, index, status):
+        """Change the mark on one row."""
+        items = list(self._items)
+        label, _status = items[index]
+        items[index] = (label, str(status).upper())
+        return self._spawn(items)
+
+    @animated("_title", "_subject", "_width", "_items", anchor="top_left")
+    def pop(self, index=-1):
+        """Remove one row."""
+        items = list(self._items)
+        items.pop(index)
+        return self._spawn(items)
+
+
+def _pairs(items):
+    if len(items) == 1 and isinstance(items[0], list):
+        items = tuple(items[0])
+    if len(items) == 2 and all(isinstance(item, str) for item in items):
+        items = (items,)
+    pairs = []
+    for item in items:
+        if isinstance(item, (tuple, list)) and len(item) == 2:
+            pairs.append((str(item[0]), str(item[1]).upper()))
+        else:
+            raise TypeError('Checklist.add expects ("label", "STATUS") pairs')
+    return pairs
+
 
 class KeyValueList(VGroup):
-    """``copies: 3`` style lines, values in a brighter color."""
+    """``copies: 3`` style lines, values in a brighter color.
+
+    Animate ``add(("port", "8080"))``, ``set_value("copies", "5")``, and
+    ``pop()``. New lines grow downward from the first key.
+    """
 
     def __init__(
         self, pairs, font_size=26, value_color=TEXT, key_color=MUTED, buff=0.12
     ):
+        self._pairs = [(key, value) for key, value in pairs]
+        self._font_size = font_size
+        self._value_color = value_color
+        self._key_color = key_color
+        self._buff = buff
         lines = []
         for key, value in pairs:
             row = VGroup(
@@ -290,15 +449,71 @@ class KeyValueList(VGroup):
         super().__init__(*lines)
         self.arrange(DOWN, buff=buff, aligned_edge=LEFT)
 
+    def _spawn(self, pairs):
+        return KeyValueList(
+            pairs,
+            font_size=self._font_size,
+            value_color=self._value_color,
+            key_color=self._key_color,
+            buff=self._buff,
+        )
+
+    @animated(
+        "_pairs", "_font_size", "_value_color", "_key_color", "_buff",
+        anchor="top_left", mobject_safe=True,
+    )
+    def add(self, *pairs):
+        """Append ``("key", "value")`` lines."""
+        extra = pairs
+        if len(pairs) == 2 and all(isinstance(item, str) for item in pairs):
+            extra = (pairs,)
+        return self._spawn([*self._pairs, *extra])
+
+    @animated(
+        "_pairs", "_font_size", "_value_color", "_key_color", "_buff",
+        anchor="top_left",
+    )
+    def set_value(self, key, value):
+        """Change a value, or append the key if it is new."""
+        found = False
+        pairs = []
+        for current, current_value in self._pairs:
+            if current == key:
+                pairs.append((key, value))
+                found = True
+            else:
+                pairs.append((current, current_value))
+        if not found:
+            pairs.append((key, value))
+        return self._spawn(pairs)
+
+    @animated(
+        "_pairs", "_font_size", "_value_color", "_key_color", "_buff",
+        anchor="top_left",
+    )
+    def pop(self, index=-1):
+        """Remove one line."""
+        pairs = list(self._pairs)
+        pairs.pop(index)
+        return self._spawn(pairs)
+
 
 class SpecCard(VGroup):
     """A header band plus key/value body. The Deployment card in the Kubernetes video.
 
     ``SpecCard("Deployment", "/registry/deployments/web", [("copies", "3")])``
+
+    Animate ``set_field("copies", "5")`` to change a field or add one.
+    Scale and shift work like any other mobject.
     """
 
     def __init__(self, kind, path="", fields=None, kind_label="kind:", width=5.4):
-        fields = fields or []
+        fields = list(fields or [])
+        self._kind = kind
+        self._path = path
+        self._fields = [(key, value) for key, value in fields]
+        self._kind_label = kind_label
+        self._width = width
         kind_line = VGroup(
             Body(kind_label, font_size=26, color=MUTED),
             Body(kind, font_size=28, color=PURPLE, weight=BOLD),
@@ -339,11 +554,42 @@ class SpecCard(VGroup):
         super().__init__(*parts)
         self.fields = body
 
+    @animated(
+        "_kind", "_path", "_fields", "_kind_label", "_width", anchor="top_left"
+    )
+    def set_field(self, key, value):
+        """Change a body field, or append it when the key is new."""
+        found = False
+        fields = []
+        for current, current_value in self._fields:
+            if current == key:
+                fields.append((key, value))
+                found = True
+            else:
+                fields.append((current, current_value))
+        if not found:
+            fields.append((key, value))
+        return SpecCard(
+            self._kind,
+            self._path,
+            fields,
+            kind_label=self._kind_label,
+            width=self._width,
+        )
+
 
 class QuestionCard(VGroup):
-    """A numbered prompt: ``01`` and a question, used as a row of three."""
+    """A numbered prompt: ``01`` and a question, used as a row of three.
+
+    Animate ``set_question("Where does the write go?")``. The card keeps
+    its size. Scale and shift work like any other mobject.
+    """
 
     def __init__(self, number, question, width=3.15, height=2.05):
+        self._number = number
+        self._question = question
+        self._width = width
+        self._height = height
         self.panel = Panel(width, height, state="idle", corner_radius=0.12)
         self.number = MonoText(f"{int(number):02d}", font_size=32, color=PURPLE)
         self.question = Body(question, font_size=22, color=TEXT)
@@ -354,6 +600,13 @@ class QuestionCard(VGroup):
         )
         text.move_to(self.panel).align_to(self.panel, LEFT).shift(RIGHT * 0.24)
         super().__init__(self.panel, text)
+
+    @animated("_number", "_question", "_width", "_height", anchor="center")
+    def set_question(self, question):
+        """Replace the question and keep the number."""
+        return QuestionCard(
+            self._number, question, width=self._width, height=self._height
+        )
 
 
 class ServiceLogo(VGroup):
@@ -378,9 +631,19 @@ class ServiceLogo(VGroup):
 
 
 class InstanceCard(VGroup):
-    """A cloud instance: name, type, address, and a footer such as ``running``."""
+    """A cloud instance: name, type, address, and a footer such as ``running``.
+
+    Animate ``set_footer("running")``. A footer of running, healthy, active,
+    or ready is drawn green. Scale and shift work like any other mobject.
+    """
 
     def __init__(self, name, kind, address="", footer="", width=2.7, height=1.7):
+        self._name = name
+        self._kind = kind
+        self._address = address
+        self._footer = footer
+        self._width = width
+        self._height = height
         self.panel = Panel(width, height, state="idle", corner_radius=0.12)
         self.name_text = Title(name, font_size=16)
         self.kind_text = Body(kind, font_size=26)
@@ -404,11 +667,33 @@ class InstanceCard(VGroup):
         stack.move_to(self.panel)
         super().__init__(self.panel, stack)
 
+    @animated(
+        "_name", "_kind", "_address", "_footer", "_width", "_height", anchor="center"
+    )
+    def set_footer(self, footer):
+        """Replace the footer line."""
+        return InstanceCard(
+            self._name,
+            self._kind,
+            address=self._address,
+            footer=footer,
+            width=self._width,
+            height=self._height,
+        )
+
 
 class LabeledColumn(VGroup):
-    """A heading over a stack of small cards, optional mono footer."""
+    """A heading over a stack of small cards, optional mono footer.
+
+    Animate ``add("worker")`` and ``pop()``. The heading stays put.
+    """
 
     def __init__(self, title, items, footer=None, item_state="idle", width=2.5):
+        self._title = title
+        self._items = [str(item) for item in items]
+        self._footer = footer
+        self._item_state = item_state
+        self._width = width
         self.title = Title(title, font_size=16)
         cards = VGroup(
             *[
@@ -428,6 +713,32 @@ class LabeledColumn(VGroup):
         self.arrange(DOWN, buff=0.14)
         self.cards = cards
 
+    def _spawn(self, items):
+        return LabeledColumn(
+            self._title,
+            items,
+            footer=self._footer,
+            item_state=self._item_state,
+            width=self._width,
+        )
+
+    @animated(
+        "_title", "_items", "_footer", "_item_state", "_width",
+        anchor="top_left", mobject_safe=True,
+    )
+    def add(self, item):
+        """Append a card under the heading."""
+        return self._spawn([*self._items, str(item)])
+
+    @animated(
+        "_title", "_items", "_footer", "_item_state", "_width", anchor="top_left"
+    )
+    def pop(self, index=-1):
+        """Remove one card."""
+        items = list(self._items)
+        items.pop(index)
+        return self._spawn(items)
+
 
 class Comparison(VGroup):
     """Side-by-side columns. Each entry is ``(title, items, state)``."""
@@ -442,9 +753,17 @@ class Comparison(VGroup):
 
 
 class JobQueue(VGroup):
-    """A titled list of jobs. ``highlight`` paints one row violet."""
+    """A titled list of jobs. ``highlight`` paints one row violet.
+
+    Animate ``add("compile")``, ``set_highlight(0)``, and ``pop()``.
+    The title stays put while jobs grow downward.
+    """
 
     def __init__(self, jobs, title="QUEUE", highlight=None, width=4.2):
+        self._jobs = [str(job) for job in jobs]
+        self._title = title
+        self._highlight = highlight
+        self._width = width
         self.title = Title(title, font_size=16)
         rows = []
         for i, job in enumerate(jobs):
@@ -457,11 +776,38 @@ class JobQueue(VGroup):
         super().__init__(self.title, self.rows)
         self.arrange(DOWN, buff=0.12, aligned_edge=LEFT)
 
+    def _spawn(self, jobs, highlight):
+        return JobQueue(jobs, title=self._title, highlight=highlight, width=self._width)
+
+    @animated("_jobs", "_title", "_highlight", "_width", anchor="top_left", mobject_safe=True)
+    def add(self, *jobs):
+        """Append job names."""
+        return self._spawn([*self._jobs, *[str(job) for job in jobs]], self._highlight)
+
+    @animated("_jobs", "_title", "_highlight", "_width", anchor="top_left")
+    def set_highlight(self, index):
+        """Paint one row violet. ``None`` clears it."""
+        return self._spawn(self._jobs, index)
+
+    @animated("_jobs", "_title", "_highlight", "_width", anchor="top_left")
+    def pop(self, index=-1):
+        """Remove one job."""
+        jobs = list(self._jobs)
+        jobs.pop(index)
+        return self._spawn(jobs, self._highlight)
+
 
 class CounterStack(VGroup):
-    """Stacked integers with one of them full-size. The single-counter graphic."""
+    """Stacked integers with one of them full-size. The single-counter graphic.
+
+    Animate ``set_active(0)`` to enlarge a different number, or
+    ``set_values([1, 2, 3])`` to replace the stack.
+    """
 
     def __init__(self, values, active=None, font_size=42):
+        self._values = list(values)
+        self._active = len(values) // 2 if active is None and values else active
+        self._font_size = font_size
         if active is None and values:
             active = len(values) // 2
         mobs = []
@@ -477,11 +823,30 @@ class CounterStack(VGroup):
         super().__init__(*mobs)
         self.arrange(DOWN, buff=0.08)
 
+    @animated("_values", "_active", "_font_size", anchor="center")
+    def set_active(self, index):
+        """Make one of the numbers full size."""
+        return CounterStack(self._values, active=index, font_size=self._font_size)
+
+    @animated("_values", "_active", "_font_size", anchor="center")
+    def set_values(self, values, active=None):
+        """Replace the numbers. ``active`` defaults to the middle one."""
+        return CounterStack(
+            values,
+            active=self._active if active is None else active,
+            font_size=self._font_size,
+        )
+
 
 class PlanList(VGroup):
-    """Terraform-style actions. Each item is ``(mark, text)`` with mark ``+``, ``~``, or ``-``."""
+    """Terraform-style actions. Each item is ``(mark, text)`` with mark ``+``, ``~``, or ``-``.
+
+    Animate ``add(("+", "aws_instance.web"))`` and ``pop()``. Lines grow downward.
+    """
 
     def __init__(self, items, font_size=24):
+        self._items = [(mark, text) for mark, text in items]
+        self._font_size = font_size
         colors = {"+": GREEN, "~": PURPLE, "-": ORANGE, "!": ORANGE}
         rows = []
         for mark, text in items:
@@ -492,6 +857,24 @@ class PlanList(VGroup):
             rows.append(VGroup(flag, words))
         super().__init__(*rows)
         self.arrange(DOWN, buff=0.1, aligned_edge=LEFT)
+
+    def _spawn(self, items):
+        return PlanList(items, font_size=self._font_size)
+
+    @animated("_items", "_font_size", anchor="top_left", mobject_safe=True)
+    def add(self, *items):
+        """Append ``("+", "aws_instance.web")`` lines."""
+        extra = items
+        if len(items) == 2 and all(isinstance(item, str) for item in items):
+            extra = (items,)
+        return self._spawn([*self._items, *extra])
+
+    @animated("_items", "_font_size", anchor="top_left")
+    def pop(self, index=-1):
+        """Remove one action."""
+        rows = list(self._items)
+        rows.pop(index)
+        return self._spawn(rows)
 
 
 class SplitPanel(VGroup):
@@ -513,11 +896,21 @@ class SplitPanel(VGroup):
 
 
 class CodeWindow(VGroup):
-    """A window chrome around a code block: three dots, optional title, then the code."""
+    """A window chrome around a code block: three dots, optional title, then the code.
+
+    Animate ``set_code("SELECT id FROM users")``. The top-left corner stays
+    put while the body grows. Scale and shift work like any other mobject.
+    """
 
     def __init__(
         self, code, language="plain", title=None, theme="dark", width=6.6, font_size=22
     ):
+        self._code = code
+        self._language = language
+        self._title = title
+        self._theme = theme
+        self._width = width
+        self._font_size = font_size
         from .codeblocks import CodeBlock
 
         colors = {
@@ -588,3 +981,18 @@ class CodeWindow(VGroup):
         parts.append(stroke)
         super().__init__(*parts)
         self.stroke = stroke
+
+    @animated(
+        "_code", "_language", "_title", "_theme", "_width", "_font_size",
+        anchor="top_left",
+    )
+    def set_code(self, code):
+        """Replace the source inside the window."""
+        return CodeWindow(
+            code,
+            language=self._language,
+            title=self._title,
+            theme=self._theme,
+            width=self._width,
+            font_size=self._font_size,
+        )

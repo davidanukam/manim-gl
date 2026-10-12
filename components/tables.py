@@ -2,6 +2,7 @@
 
 from manimlib import DOWN, LEFT, RIGHT, Triangle, UP, VGroup
 
+from .motion import animated
 from .primitives import Callout, Panel, Slot, TextCard
 from .text import Body, MonoText, Title
 from .theme import DIM, MONO, MUTED, PURPLE, TEXT
@@ -13,6 +14,9 @@ class LogRow(VGroup):
     ``states`` lines up with ``labels``. Shorthand: ``filled=[1, 2]`` and
     ``active=3`` (drawn as an outline). ``pointer`` hangs under ``pointer_at``
     or under ``active``.
+
+    Animate ``add("8")``, ``add("9", state="outline")``, ``set_cell(3, "filled")``,
+    ``point_at(3, "APPEND")``, and ``pop()``. The row grows to the right.
     """
 
     def __init__(
@@ -26,6 +30,8 @@ class LogRow(VGroup):
         size=0.78,
         font_size=22,
     ):
+        self._size = size
+        self._font_size = font_size
         resolved = list(states) if states is not None else ["idle"] * len(labels)
         if len(resolved) < len(labels):
             resolved.extend(["idle"] * (len(labels) - len(resolved)))
@@ -36,6 +42,10 @@ class LogRow(VGroup):
             resolved[active] = "outline"
             if pointer_at is None:
                 pointer_at = active
+        self._labels = [str(label) for label in labels]
+        self._states = list(resolved)
+        self._pointer = pointer
+        self._pointer_at = pointer_at
         self.cells = VGroup(
             *[
                 Slot(
@@ -53,11 +63,80 @@ class LogRow(VGroup):
             parts.append(self.pointer)
         super().__init__(*parts)
 
+    def _spawn(self, labels, states, pointer, pointer_at):
+        return LogRow(
+            labels,
+            states=states,
+            pointer=pointer,
+            pointer_at=pointer_at,
+            size=self._size,
+            font_size=self._font_size,
+        )
+
+    @animated(
+        "_labels", "_states", "_pointer", "_pointer_at", "_size", "_font_size",
+        anchor="top_left", mobject_safe=True,
+    )
+    def add(self, label, state="idle"):
+        """Append a cell."""
+        return self._spawn(
+            [*self._labels, str(label)],
+            [*self._states, state],
+            self._pointer,
+            self._pointer_at,
+        )
+
+    @animated(
+        "_labels", "_states", "_pointer", "_pointer_at", "_size", "_font_size",
+        anchor="top_left",
+    )
+    def set_cell(self, index, state=None, label=None):
+        """Change one cell's state, its label, or both."""
+        labels = list(self._labels)
+        states = list(self._states)
+        if label is not None:
+            labels[index] = str(label)
+        if state is not None:
+            states[index] = state
+        return self._spawn(labels, states, self._pointer, self._pointer_at)
+
+    @animated(
+        "_labels", "_states", "_pointer", "_pointer_at", "_size", "_font_size",
+        anchor="top_left",
+    )
+    def point_at(self, index, text):
+        """Hang a callout under one cell."""
+        return self._spawn(self._labels, self._states, text, index)
+
+    @animated(
+        "_labels", "_states", "_pointer", "_pointer_at", "_size", "_font_size",
+        anchor="top_left",
+    )
+    def pop(self, index=-1):
+        """Remove one cell."""
+        labels = list(self._labels)
+        states = list(self._states)
+        labels.pop(index)
+        states.pop(index)
+        pointer_at = self._pointer_at
+        if pointer_at is not None and pointer_at >= len(labels):
+            pointer_at = len(labels) - 1 if labels else None
+        return self._spawn(labels, states, self._pointer, pointer_at)
+
 
 class LabeledRow(VGroup):
-    """A row name beside a run of slots. ``LabeledRow("P1", ["", "1", "2", "3", ""])``."""
+    """A row name beside a run of slots. ``LabeledRow("P1", ["", "1", "2", "3", ""])``.
+
+    Animate ``set_cell(2, "1", state="filled")``. The row name stays put.
+    """
 
     def __init__(self, label, cells, states=None, size=0.62):
+        self._label = label
+        self._cells = [str(cell) for cell in cells]
+        self._states = list(states) if states is not None else ["ghost"] * len(cells)
+        if len(self._states) < len(self._cells):
+            self._states.extend(["ghost"] * (len(self._cells) - len(self._states)))
+        self._size = size
         self.row_label = Title(label, font_size=20)
         resolved = list(states) if states is not None else ["ghost"] * len(cells)
         self.cells = VGroup(
@@ -76,11 +155,29 @@ class LabeledRow(VGroup):
         self.row_label.next_to(self.cells, LEFT, buff=0.22)
         super().__init__(self.row_label, self.cells)
 
+    @animated("_label", "_cells", "_states", "_size", anchor="top_left")
+    def set_cell(self, index, text, state=None):
+        """Replace one slot's text and, optionally, its state."""
+        cells = list(self._cells)
+        states = list(self._states)
+        cells[index] = str(text)
+        if state is not None:
+            states[index] = state
+        return LabeledRow(self._label, cells, states=states, size=self._size)
+
 
 class ChipRow(VGroup):
-    """A row of small labels. ``accent`` is a list of indexes to fill."""
+    """A row of small labels. ``accent`` is a list of indexes to fill.
+
+    Animate ``add("token")``, ``add("hot", accent=True)``, ``set_accent([0, 2])``,
+    and ``pop()``.
+    """
 
     def __init__(self, labels, accent=None, state="idle", font_size=20):
+        self._labels = [str(label) for label in labels]
+        self._accent = tuple(accent or [])
+        self._state = state
+        self._font_size = font_size
         accent = set(accent or [])
         chips = []
         for i, label in enumerate(labels):
@@ -97,16 +194,55 @@ class ChipRow(VGroup):
         self.arrange(RIGHT, buff=0.12)
         self.chips = chips
 
+    def _spawn(self, labels, accent):
+        return ChipRow(
+            labels, accent=accent, state=self._state, font_size=self._font_size
+        )
+
+    @animated(
+        "_labels", "_accent", "_state", "_font_size",
+        anchor="top_left", mobject_safe=True,
+    )
+    def add(self, label, accent=False):
+        """Append a chip. ``accent=True`` fills it."""
+        marks = list(self._accent)
+        if accent:
+            marks.append(len(self._labels))
+        return self._spawn([*self._labels, str(label)], marks)
+
+    @animated("_labels", "_accent", "_state", "_font_size", anchor="top_left")
+    def set_accent(self, indexes):
+        """Fill the chips at these indexes."""
+        return self._spawn(self._labels, list(indexes))
+
+    @animated("_labels", "_accent", "_state", "_font_size", anchor="top_left")
+    def pop(self, index=-1):
+        """Remove one chip."""
+        labels = list(self._labels)
+        labels.pop(index)
+        if index < 0:
+            index = len(self._labels) + index
+        marks = [i if i < index else i - 1 for i in self._accent if i != index]
+        return self._spawn(labels, marks)
+
 
 class GridTable(VGroup):
     """A compact table. ``highlight`` is a body-row index.
 
     ``GridTable(["TERM", "DOCS"], [["fox", "1, 12"], ["brown", "1"]], highlight=0)``
+
+    Animate ``set_highlight(1)`` to move the violet bar. ``None`` clears it.
     """
 
     def __init__(
-        self, headers, rows, highlight=None, font_size=22, row_height=0.46, col_gap=0.55
+        self, headers, rows, highlight=None, font_size=22,         row_height=0.46, col_gap=0.55
     ):
+        self._headers = list(headers)
+        self._rows = [list(row) for row in rows]
+        self._highlight = highlight
+        self._font_size = font_size
+        self._row_height = row_height
+        self._col_gap = col_gap
         body = []
         header_mobs = [Title(str(h), font_size=max(14, font_size - 6)) for h in headers]
         row_mobs = []
@@ -163,14 +299,37 @@ class GridTable(VGroup):
         block.move_to(self.panel)
         super().__init__(self.panel, block)
 
+    @animated(
+        "_headers", "_rows", "_highlight", "_font_size", "_row_height", "_col_gap",
+        anchor="top_left",
+    )
+    def set_highlight(self, index):
+        """Move the highlight bar to a body row. ``None`` clears it."""
+        return GridTable(
+            self._headers,
+            self._rows,
+            highlight=index,
+            font_size=self._font_size,
+            row_height=self._row_height,
+            col_gap=self._col_gap,
+        )
+
 
 class DataPage(VGroup):
-    """A small table with an optional cursor beside one row."""
+    """A small table with an optional cursor beside one row.
+
+    Animate ``set_cursor(2)`` to move the triangle. ``None`` hides it.
+    """
 
     def __init__(
-        self, rows, headers=None, cursor=None, cursor_label="CURSOR", font_size=20
+        self, rows, headers=None, cursor=None,         cursor_label="CURSOR", font_size=20
     ):
-        headers = headers or []
+        self._rows = [list(row) for row in rows]
+        self._headers = list(headers) if headers else []
+        self._cursor = cursor
+        self._cursor_label = cursor_label
+        self._font_size = font_size
+        headers = self._headers
         table_rows = []
         if headers:
             table_rows.append(
@@ -229,12 +388,28 @@ class DataPage(VGroup):
             self.cursor_text = label
         super().__init__(*parts)
 
+    @animated(
+        "_rows", "_headers", "_cursor", "_cursor_label", "_font_size",
+        anchor="top_left",
+    )
+    def set_cursor(self, index, label=None):
+        """Point the cursor at a body row. ``None`` hides it."""
+        return DataPage(
+            self._rows,
+            headers=self._headers or None,
+            cursor=index,
+            cursor_label=self._cursor_label if label is None else label,
+            font_size=self._font_size,
+        )
+
 
 class CellGrid(VGroup):
     """A matrix of slots.
 
     ``marks`` maps ``(row, col)`` to a state name. Used for byte grids,
     hypervisor slices, and shard maps.
+
+    Animate ``set_mark(1, 2, "accent")``. The grid stays centered.
     """
 
     def __init__(
@@ -247,7 +422,14 @@ class CellGrid(VGroup):
         default="ghost",
         caption=None,
     ):
-        marks = marks or {}
+        self._rows = rows
+        self._cols = cols
+        self._marks = dict(marks or {})
+        self._size = size
+        self._gap = gap
+        self._default = default
+        self._caption = caption
+        marks = self._marks
         cells = VGroup()
         for r in range(rows):
             for c in range(cols):
@@ -267,3 +449,24 @@ class CellGrid(VGroup):
             parts.append(self.caption_text)
         super().__init__(*parts)
         self.cells = cells
+
+    @animated(
+        "_rows", "_cols", "_marks", "_size", "_gap", "_default", "_caption",
+        anchor="center",
+    )
+    def set_mark(self, row, col, state):
+        """Color one cell. ``state=None`` clears that mark."""
+        marks = dict(self._marks)
+        if state is None:
+            marks.pop((row, col), None)
+        else:
+            marks[(row, col)] = state
+        return CellGrid(
+            rows=self._rows,
+            cols=self._cols,
+            marks=marks,
+            size=self._size,
+            gap=self._gap,
+            default=self._default,
+            caption=self._caption,
+        )

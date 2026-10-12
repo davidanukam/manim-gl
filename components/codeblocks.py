@@ -4,6 +4,7 @@ import re
 
 from manimlib import DOWN, LEFT, RIGHT, VGroup
 
+from .motion import animated
 from .primitives import Panel
 from .text import MonoText
 from .theme import DIM, MONO, MUTED, ORANGE, PURPLE, TEXT
@@ -162,6 +163,8 @@ class CodeBlock(VGroup):
     """A block of code. ``language`` is ``sql``, ``python``, ``hcl``, ``shell``, or ``plain``.
 
     ``boxed=False`` returns only the lines, so a :class:`CodeWindow` can supply the chrome.
+
+    Animate ``set_source("SELECT id FROM users")``. The top-left corner stays put.
     """
 
     def __init__(
@@ -175,6 +178,14 @@ class CodeBlock(VGroup):
         keyword_color=PURPLE,
         state="idle",
     ):
+        self._source = source
+        self._language = language
+        self._width = width
+        self._font_size = font_size
+        self._boxed = boxed
+        self._text_color = text_color
+        self._keyword_color = keyword_color
+        self._state = state
         if isinstance(source, str):
             lines = source.splitlines() or [""]
         else:
@@ -201,16 +212,47 @@ class CodeBlock(VGroup):
         self.lines.move_to(self.panel).align_to(self.panel, LEFT).shift(RIGHT * 0.24)
         super().__init__(self.panel, self.lines)
 
+    @animated(
+        "_source", "_language", "_width", "_font_size", "_boxed",
+        "_text_color", "_keyword_color", "_state",
+        anchor="top_left",
+    )
+    def set_source(self, source):
+        """Replace the code."""
+        return CodeBlock(
+            source,
+            language=self._language,
+            width=self._width,
+            font_size=self._font_size,
+            boxed=self._boxed,
+            text_color=self._text_color,
+            keyword_color=self._keyword_color,
+            state=self._state,
+        )
+
 
 class Terminal(VGroup):
     """A prompt and a command, with optional output lines underneath.
 
     ``Terminal("terraform plan", prompt="$")``
+
+    Animate ``set_command("terraform apply")`` and ``add_output("Apply complete")``.
+    The prompt stays at the top left.
     """
 
     def __init__(
         self, command, prompt="$", output=None, font_size=26, prompt_color=MUTED
     ):
+        self._command = command
+        self._prompt = prompt
+        if output is None:
+            self._output = []
+        elif isinstance(output, str):
+            self._output = output.splitlines()
+        else:
+            self._output = list(output)
+        self._font_size = font_size
+        self._prompt_color = prompt_color
         self.prompt_text = MonoText(prompt, font_size=font_size, color=prompt_color)
         self.command_text = MonoText(command, font_size=font_size, color=TEXT)
         self.command_text.next_to(self.prompt_text, RIGHT, buff=0.16)
@@ -230,3 +272,28 @@ class Terminal(VGroup):
             self.output_lines.next_to(row, DOWN, buff=0.12).align_to(row, LEFT)
             parts.append(self.output_lines)
         super().__init__(*parts)
+
+    def _spawn(self, command, output):
+        return Terminal(
+            command,
+            prompt=self._prompt,
+            output=output or None,
+            font_size=self._font_size,
+            prompt_color=self._prompt_color,
+        )
+
+    @animated(
+        "_command", "_prompt", "_output", "_font_size", "_prompt_color",
+        anchor="top_left",
+    )
+    def set_command(self, command):
+        """Replace the command after the prompt."""
+        return self._spawn(command, self._output)
+
+    @animated(
+        "_command", "_prompt", "_output", "_font_size", "_prompt_color",
+        anchor="top_left", mobject_safe=True,
+    )
+    def add_output(self, line):
+        """Append one output line."""
+        return self._spawn(self._command, [*self._output, str(line)])

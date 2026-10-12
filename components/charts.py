@@ -3,6 +3,7 @@
 import numpy as np
 from manimlib import DOWN, LEFT, RIGHT, UP, VGroup
 
+from .motion import animated
 from .primitives import Panel, Rule
 from .text import Body, Caption, Title
 from .theme import DIM, LINE, MUTED, PURPLE, TEXT, mix_hex
@@ -67,6 +68,10 @@ class Meter(VGroup):
     is the full orange bar. ``value`` is a fraction from 0 to 1. ``left_label``
     and ``right_label`` sit above the ends (the half-written line). ``side_label``
     sits to the right of a short indicator.
+
+    Animate ``set_value(0.35)`` or ``set_value(1, text="10 GB")``. The left
+    edge of the bar stays put while the fill grows. Scale and shift work
+    like any other mobject.
     """
 
     def __init__(
@@ -87,6 +92,22 @@ class Meter(VGroup):
         corner_radius=None,
     ):
         value = max(0.0, min(1.0, float(value)))
+        self._spec = dict(
+            value=value,
+            width=width,
+            height=height,
+            color=color,
+            eyebrow=eyebrow,
+            eyebrow_color=eyebrow_color,
+            value_text=value_text,
+            caption=caption,
+            caption_color=caption_color,
+            left_label=left_label,
+            right_label=right_label,
+            side_label=side_label,
+            track=track,
+            corner_radius=corner_radius,
+        )
         radius = height / 2 if corner_radius is None else corner_radius
         self.track = Panel(
             width,
@@ -96,21 +117,20 @@ class Meter(VGroup):
             corner_radius=radius,
             state="ghost",
         )
-        fill_w = max(height, width * value) if value > 0 else 0.0
-        parts = [self.track]
-        self.fill = None
-        if fill_w > 0:
-            self.fill = Panel(
-                min(fill_w, width),
-                height,
-                fill=color,
-                stroke_width=0,
-                corner_radius=radius,
-                state="accent",
-            )
-            self.fill.align_to(self.track, LEFT)
-            self.fill.set_y(self.track.get_y())
-            parts.append(self.fill)
+        fill_w = max(height, width * value) if value > 0 else 0.02
+        self.fill = Panel(
+            min(fill_w, width),
+            height,
+            fill=color,
+            stroke_width=0,
+            corner_radius=radius,
+            state="accent",
+        )
+        self.fill.align_to(self.track, LEFT)
+        self.fill.set_y(self.track.get_y())
+        if value <= 0:
+            self.fill.set_opacity(0)
+        parts = [self.track, self.fill]
         self.eyebrow = None
         if eyebrow:
             self.eyebrow = Title(eyebrow, color=eyebrow_color or MUTED, font_size=18)
@@ -149,22 +169,54 @@ class Meter(VGroup):
             parts.append(self.side)
         super().__init__(*parts)
 
+    @animated("_spec", anchor="left")
+    def set_value(self, value, text=None):
+        """Move the fill to a new fraction. ``text`` replaces the figure under the bar."""
+        spec = dict(self._spec)
+        spec["value"] = value
+        if text is not None:
+            spec["value_text"] = str(text)
+        return Meter(**spec)
+
 
 class RangeBar(VGroup):
-    """A label, a bar, and another label. ``A few hundred  ———  instant``."""
+    """A label, a bar, and another label. ``A few hundred  ———  instant``.
+
+    Animate ``set_value(0.2)``. The left label stays put.
+    """
 
     def __init__(self, left, right, fill=0.75, width=3.6, height=0.42, color=PURPLE):
+        self._left = left
+        self._right = right
+        self._fill = fill
+        self._width = width
+        self._height = height
+        self._color = color
         self.left_text = Body(left, font_size=24, color=TEXT)
         self.bar = Meter(fill, width=width, height=height, color=color)
         self.right_text = Body(right, font_size=24, color=TEXT)
         super().__init__(self.left_text, self.bar, self.right_text)
         self.arrange(RIGHT, buff=0.28)
 
+    @animated("_left", "_right", "_fill", "_width", "_height", "_color", anchor="left")
+    def set_value(self, fill):
+        """Change how much of the bar is filled, from 0 to 1."""
+        return RangeBar(
+            self._left,
+            self._right,
+            fill=fill,
+            width=self._width,
+            height=self._height,
+            color=self._color,
+        )
+
 
 class BarChart(VGroup):
     """Vertical bars on a shared baseline, with an optional dashed ceiling.
 
     ``BarChart([1, 2, 2.2, 2.2], labels=["", "", "S3", ""], title="CAPACITY")``
+
+    Animate ``set_values([1, 3, 2, 4])``. Bars grow from the shared baseline.
     """
 
     def __init__(
@@ -178,7 +230,15 @@ class BarChart(VGroup):
         gap=0.22,
         show_ceiling=True,
     ):
-        values = [float(v) for v in values]
+        self._values = [float(v) for v in values]
+        self._labels = list(labels) if labels is not None else None
+        self._title = title
+        self._color = color
+        self._bar_width = bar_width
+        self._max_height = max_height
+        self._gap = gap
+        self._show_ceiling = show_ceiling
+        values = list(self._values)
         peak = max(values) if values else 1.0
         peak = peak or 1.0
         labels = list(labels) if labels is not None else [""] * len(values)
@@ -242,11 +302,30 @@ class BarChart(VGroup):
                 parts.append(self.title)
         super().__init__(*parts)
 
+    @animated(
+        "_values", "_labels", "_title", "_color", "_bar_width", "_max_height",
+        "_gap", "_show_ceiling", anchor="bottom",
+    )
+    def set_values(self, values, labels=None):
+        """Replace the bar heights. Pass ``labels`` to retitle the columns."""
+        return BarChart(
+            values,
+            labels=self._labels if labels is None else labels,
+            title=self._title,
+            color=self._color,
+            bar_width=self._bar_width,
+            max_height=self._max_height,
+            gap=self._gap,
+            show_ceiling=self._show_ceiling,
+        )
+
 
 class Timeline(VGroup):
     """A hatched track with event markers.
 
     ``markers`` is a list of ``(position, label)`` with position in 0..1.
+
+    Animate ``add_marker(0.5, "SYNC")``. The left end of the track stays put.
     """
 
     def __init__(
@@ -259,6 +338,13 @@ class Timeline(VGroup):
         height=0.42,
         color=PURPLE,
     ):
+        self._markers = [(float(pos), label) for pos, label in markers]
+        self._start = start
+        self._end = end
+        self._title = title
+        self._width = width
+        self._height = height
+        self._color = color
         self.track = Panel(
             width, height, state="ghost", fill="#2A2A2A", corner_radius=0.06
         )
@@ -291,12 +377,30 @@ class Timeline(VGroup):
             parts.append(self.title)
         super().__init__(*parts)
 
+    @animated(
+        "_markers", "_start", "_end", "_title", "_width", "_height", "_color",
+        anchor="top_left", mobject_safe=True,
+    )
+    def add_marker(self, position, label):
+        """Add an event at ``position`` (0 to 1)."""
+        return Timeline(
+            [*self._markers, (position, label)],
+            start=self._start,
+            end=self._end,
+            title=self._title,
+            width=self._width,
+            height=self._height,
+            color=self._color,
+        )
+
 
 class Heatmap(VGroup):
     """A grid of cells tinted by values in 0..1.
 
     ``tint`` is ``gray`` or ``purple``. Pass a 2D list, or ``rows`` and ``cols``
     plus a ``pattern`` callable ``(r, c) -> float``.
+
+    Animate ``set_values(grid)`` with a new 2D list. The grid stays centered.
     """
 
     def __init__(
@@ -309,6 +413,9 @@ class Heatmap(VGroup):
         gap=0.05,
         pattern=None,
     ):
+        self._tint = tint
+        self._cell = cell
+        self._gap = gap
         if values is None:
             values = [
                 [pattern(r, c) if pattern else 0.15 for c in range(cols)]
@@ -330,8 +437,14 @@ class Heatmap(VGroup):
                 )
                 square.move_to([c * (cell + gap), -r * (cell + gap), 0])
                 cells.add(square)
+        self._values = [[float(raw) for raw in row] for row in values]
         super().__init__(cells)
         self.cells = cells
+
+    @animated("_values", "_tint", "_cell", "_gap", anchor="center")
+    def set_values(self, values):
+        """Retint the grid. ``values`` is a 2D list of fractions from 0 to 1."""
+        return Heatmap(values, tint=self._tint, cell=self._cell, gap=self._gap)
 
 
 class TickLine(VGroup):

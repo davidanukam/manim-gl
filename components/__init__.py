@@ -10,9 +10,12 @@ Build a scene from the repo root:
             self.add(TextCard("AUTH", state="outline"))
 
 Every component is a mobject: ``move_to``, ``scale``, ``next_to``, and
-``set_color`` all work. Cards also take ``state`` (idle, ghost, filled,
-selected, outline, accent, hot, pink, danger, warn, ok, muted, plain)
-and a ``set_state`` method where that makes sense.
+``set_color`` all work, including under ``animate``. Cards also take
+``state`` (idle, ghost, filled, selected, outline, accent, hot, pink,
+danger, warn, ok, muted, plain) and a ``set_state`` method where that
+makes sense. Lists, meters, and diagrams that change over a scene have
+their own methods (``add``, ``set_value``, ``set_highlight``, and so on).
+Each class docstring says which of those can be played.
 """
 
 from .cards import (

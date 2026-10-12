@@ -14,6 +14,7 @@ from manimlib import (
     VGroup,
 )
 
+from .motion import inplace
 from .text import MonoText, Title
 from .theme import LINE, MONO, MUTED, ORANGE, PURPLE, SANS, TEXT, clamp_radius, style_of
 
@@ -79,6 +80,17 @@ class TextCard(VGroup):
     This is the basic box in every video (``AUTH``, ``YOU``, ``worker``).
     Pass ``subtitle`` for a second line and ``status`` for a short state
     word such as ``BLOCKED``. ``width=None`` hugs the text.
+
+    ``Chip``, ``Pill``, ``Badge``, ``FileCard``, ``StatusCard``, and
+    ``SideCard`` use the same methods.
+
+    Animate:
+    - ``set_state("filled")`` recolors the card
+    - ``set_label("SEARCH")`` replaces the main word
+    - ``set_status("RUNNING")`` replaces the status word, when the card has one
+    - ``scale``, ``shift``, and ``set_color`` chain like any other mobject
+
+    ``self.play(card.animate.set_state("outline"))``
     """
 
     def __init__(
@@ -182,12 +194,14 @@ class TextCard(VGroup):
         super().__init__(*parts, **kwargs)
         self.pieces = pieces
 
+    @inplace("_state_name")
     def set_state(self, state):
-        """Recolor the card without rebuilding it."""
+        """Recolor the card."""
         self._state_name = state
         apply_state(self.panel, state, self.label)
         return self
 
+    @inplace()
     def set_label(self, text):
         """Replace the main label and keep it inside the card."""
         if self.label is None:
@@ -206,6 +220,28 @@ class TextCard(VGroup):
         new.move_to(self.label)
         self.pieces.remove(self.label)
         self.label = new
+        self.pieces.add(new)
+        return self
+
+    @inplace()
+    def set_status(self, text, color=None):
+        """Replace the status word under the label."""
+        if self.status_text is None:
+            return self
+        ink = self.status_text.get_color() if color is None else color
+        new = Text(
+            str(text),
+            font=SANS,
+            font_size=self.status_text.font_size,
+            color=ink,
+            weight="BOLD",
+        )
+        limit = self.panel.get_width() - 0.24
+        if new.get_width() > limit > 0:
+            new.scale(limit / new.get_width())
+        new.move_to(self.status_text)
+        self.pieces.remove(self.status_text)
+        self.status_text = new
         self.pieces.add(new)
         return self
 
@@ -249,7 +285,11 @@ class Badge(Pill):
 
 
 class Slot(VGroup):
-    """One square cell in a log, page, or partition row."""
+    """One square cell in a log, page, or partition row.
+
+    Animate ``set_state("filled")`` and ``set_label("7")``. Scale and shift
+    work like any other mobject.
+    """
 
     def __init__(
         self,
@@ -280,8 +320,25 @@ class Slot(VGroup):
         self.font = font
         self.font_size = font_size
 
+    @inplace()
     def set_state(self, state):
         apply_state(self.panel, state, self.label)
+        return self
+
+    @inplace()
+    def set_label(self, text):
+        """Replace the glyph inside the cell."""
+        style = style_of("idle")
+        ink = self.label.get_color() if self.label is not None else style["text"]
+        new = Text(str(text), font=self.font, font_size=self.font_size, color=ink)
+        limit = self.panel.get_width() * 0.78
+        if new.get_width() > limit > 0:
+            new.scale(limit / new.get_width())
+        new.move_to(self.panel)
+        if self.label is not None:
+            self.remove(self.label)
+        self.label = new
+        self.add(new)
         return self
 
 

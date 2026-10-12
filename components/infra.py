@@ -5,6 +5,7 @@ from manimlib import DOWN, Dot, LEFT, RIGHT, UP, VGroup
 
 from .cards import SideCard
 from .icons import icon
+from .motion import animated
 from .primitives import Panel, Surround, TextCard
 from .text import Body, Headline, MonoText, Title
 from .theme import DIM, GREEN, LINE, MUTED, ORANGE, PINK, PURPLE, RED, TEXT
@@ -170,9 +171,14 @@ class WorldMap(VGroup):
     """A dotted world map. ``pins`` is a list of ``(name, longitude, latitude)``.
 
     ``WorldMap([("Sydney", 151, -34), ("Virginia", -77, 39)])``
+
+    Animate ``add_pin("London", -81, 43)``. The map stays centered.
     """
 
     def __init__(self, pins=None, width=10.5, height=4.6):
+        self._pins = [tuple(pin) for pin in (pins or [])]
+        self._width = width
+        self._height = height
         self.map_width = width
         self.map_height = height
         dots = VGroup()
@@ -203,6 +209,15 @@ class WorldMap(VGroup):
         super().__init__(*parts)
         self.dots = dots
 
+    @animated("_pins", "_width", "_height", anchor="center", mobject_safe=True)
+    def add_pin(self, name, lon, lat):
+        """Drop a labeled pin at a longitude and latitude."""
+        return WorldMap(
+            [*self._pins, (name, lon, lat)],
+            width=self._width,
+            height=self._height,
+        )
+
     def project(self, lon, lat):
         """Equirectangular projection into the map's width and height."""
         lat_top, lat_bot = 78, -58
@@ -226,9 +241,15 @@ class Zone(VGroup):
 
 
 class AccessToken(VGroup):
-    """A token string with a violet underline on its tail and an expiry caption."""
+    """A token string with a violet underline on its tail and an expiry caption.
+
+    Animate ``set_token("eyJhbGciOi...")``. The token stays centered.
+    """
 
     def __init__(self, token, expires=None, font_size=22):
+        self._token = token
+        self._expires = expires
+        self._font_size = font_size
         from manimlib import Line
 
         self.token_text = MonoText(token, font_size=font_size, color=TEXT)
@@ -251,6 +272,15 @@ class AccessToken(VGroup):
             )
             parts.append(self.expires_text)
         super().__init__(*parts)
+
+    @animated("_token", "_expires", "_font_size", anchor="center")
+    def set_token(self, token, expires=None):
+        """Replace the token string. Pass ``expires`` to change the caption too."""
+        return AccessToken(
+            token,
+            expires=self._expires if expires is None else expires,
+            font_size=self._font_size,
+        )
 
 
 class PolicyLine(VGroup):
